@@ -1,9 +1,9 @@
 import tensorflow as tf
 import numpy as np
 FLAGS = tf.app.flags.FLAGS
-
-
-
+import h5py
+import time
+import sys
 
 tf.app.flags.DEFINE_string('train_dir', 'events_summary/run_1',
                            """Directory where to write event logs """
@@ -14,13 +14,17 @@ tf.app.flags.DEFINE_integer('num_gpus', 1,
                             """How many GPUs to use.""")
 tf.app.flags.DEFINE_integer('batch_size', 16,
                            """Number of images to process in a batch.""")
+tf.app.flags.DEFINE_integer('save_pred_every', 2,
+                           """Save summary frequency""")
+tf.app.flags.DEFINE_integer('print_pred_every', 20,
+                           """Print loss every steps""")
 
 NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = 30
 # Constants describing the training process.
 MOVING_AVERAGE_DECAY = 0.9999  # The decay to use for the moving average.
 NUM_EPOCHS_PER_DECAY = 350.0    # Epochs after which learning rate decays.
 LEARNING_RATE_DECAY_FACTOR = 0.1# Learning rate decay factor.
-INITIAL_LEARNING_RATE = 0.0001    # Initial learning rate.
+INITIAL_LEARNING_RATE = 1e-6   # Initial learning rate.
 # INITIAL_LEARNING_RATE_ADAM = 1e-4   # Initial learning rate.
 
 # If a model is trained with multiple GPUs, prefix all Op names with tower_name
@@ -58,21 +62,22 @@ class RegressionModel:
     """
     Define model architecture
     """
-
+    tf.summary.image("local",tf.expand_dims(images[:,:,:,0],-1))
+    tf.summary.image("prior",tf.expand_dims(images[:,:,:,1],-1))
     self.conv1 =  self.conv_layer(images, 2, 32, "conv1",filter_size=5,padding="SAME")
     self.conv1 =  batch_norm(name='bn_conv1')(self.conv1)
     self.conv1 = self.max_pool(self.conv1,"max_pool_1")
 
-    print(self.conv1.get_shape())
+    # print(self.conv1.get_shape())
 
 
     self.conv2 =  self.conv_layer(self.conv1, 32, 32, "conv2",filter_size=5,padding="SAME")
     self.conv2 =  batch_norm(name='bn_conv2')(self.conv2)
     self.conv2 = self.max_pool(self.conv2,"max_pool_2")
-    print(self.conv2.get_shape())
+    # print(self.conv2.get_shape())
 
     self.fc_1 = self.fc_layer(self.conv2,125*125*32,3,"fc")
-    print(self.fc_1.get_shape())
+    # print(self.fc_1.get_shape())
 
 
 
@@ -87,7 +92,8 @@ class RegressionModel:
   def loss(self,output,label):
     with tf.variable_scope("lossss"):
     # tf.add_to_collection('losses', cross_entropy_mean)
-      squared_error = tf.squared_difference(output , label)
+      squared_error = tf.losses.mean_squared_error(output , label)
+
       tf.add_to_collection('losses', squared_error)
 
     return tf.add_n(tf.get_collection('losses'), name='total_loss')
@@ -145,7 +151,7 @@ class RegressionModel:
     label = tf.placeholder(tf.float32, shape=(FLAGS.batch_size,3))
     output = self.inference(images)
     total_loss = self.loss(output,label)
-
+    tf.summary.scalar("loss_value",total_loss)
     self.return_train_op(total_loss,global_step)
 
     saver = tf.train.Saver(tf.global_variables())
@@ -167,11 +173,46 @@ class RegressionModel:
 
     summary_writer = tf.summary.FileWriter(FLAGS.train_dir, sess.graph)
     meta_graph_def = tf.train.export_meta_graph(filename=FLAGS.train_dir+'/my-model.meta')
-
+    self.load_dataset()
     print("GRAPH IS  SAVED")
+    self.indices = np.arange(self.num_items)
+    np.random.shuffle(self.indices)
+    # print self.indices
 
-    raw_input("Press Enter to continue...")
+    for step in range(FLAGS.max_steps):
+        start_time = time.time()
+        batch_indices = self.minibatch_indices(step)
 
+        # print batch_indices
+        minibatch = self.load_minibatch(batch_indices)
+        # print minibatch[0].shape
+        # print minibatch[1].shape
+        feed_dict = { images : minibatch[0], label:minibatch[1] }
+        
+        if step % FLAGS.save_pred_every == 0:
+            loss_value,_, summary = sess.run([total_loss, self.train_op , summary_op], feed_dict=feed_dict)
+            summary_writer.add_summary(summary, step)
+            # save(saver, sess, args.snapshot_dir, step)
+        else:
+            loss_value, _ = sess.run([total_loss, self.train_op], feed_dict=feed_dict)
+        duration = time.time() - start_time
+        if step % FLAGS.print_pred_every == 0:
+            print('step {:d} \t loss = {:.3f}, ({:.3f} sec/step)'.format(step, loss_value, duration))
+
+  def minibatch_indices(self,step):
+      counter_start = step * FLAGS.batch_size % self.num_items
+      counter_end  = (step+1) * FLAGS.batch_size % self.num_items
+      if counter_end > counter_start:
+        batch_indices = self.indices[counter_start : counter_end    ]
+      else:
+        batch_indices = np.zeros(FLAGS.batch_size,dtype = np.int)
+        batch_indices[:counter_end] = self.indices[ : counter_end    ]
+        batch_indices[counter_end:] = self.indices[:-counter_start    ]
+
+        np.random.shuffle(self.indices)
+        # print self.indices
+
+      return batch_indices
 
   def max_pool(self, bottom, name):
     return tf.nn.max_pool(bottom, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='SAME', name=name)
@@ -223,6 +264,36 @@ class RegressionModel:
 
     return weights, biases
 
+  def load_dataset(self,hdf5Filename="/media/data_raid/dnn_localization/localization_dataset/annarbor_dataset_dnn.hdf5",num_items=100):
+    b = h5py.File(hdf5Filename,"r")
+    if not num_items:
+      num_items = b['prior_map'].shape[0]
+      if num_items%20:
+
+        print "Error"
+        sys.exit()
+    self.local_map = b['local_map'][:num_items/20]
+    self.prior_map = b['prior_map'][:num_items]
+    self.output = b['output'][:num_items]
+    self.num_items = num_items
+    print  "local_map shape " , self.local_map.shape
+    print "prior_map shape " , self.prior_map.shape
+    print "outputs shape " , self.output.shape
+    print "Num of examples(augmented)" , self.num_items
+
+  def load_minibatch(self, indices):
+    images = np.zeros( (indices.size , 500,500 , 2 )  )
+    output = np.zeros( (indices.size , 3 )  )
+
+    for counter, i in enumerate(indices):
+      images[counter,:,:,0] = np.pad(np.reshape(self.local_map[i/20],(200,200) ),[[150,150],[150,150]],'constant', constant_values=(0, 0)) 
+      images[counter,:,:,1] = np.reshape(self.prior_map[i],(500,500) )
+      output[counter,:] = self.output[i]
+    return images,output
+
+
+
+
 
 def main(argv=None):  # pylint: disable=unused-argument
   if tf.gfile.Exists(FLAGS.train_dir):
@@ -231,6 +302,7 @@ def main(argv=None):  # pylint: disable=unused-argument
   print ("traning directory is %s " %(FLAGS.train_dir))
   model = RegressionModel()
   model.train()
+
 
 
 
