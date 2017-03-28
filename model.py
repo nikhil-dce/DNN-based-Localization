@@ -5,7 +5,7 @@ import h5py
 import time
 import sys
 
-tf.app.flags.DEFINE_string('train_dir', 'events_summary/run_3',
+tf.app.flags.DEFINE_string('train_dir', 'events_summary/run_4',
                            """Directory where to write event logs """
                            """and checkpoint.""")
 tf.app.flags.DEFINE_integer('max_steps', 20000,
@@ -140,6 +140,16 @@ class RegressionModel:
 
     # Group all updates to into a single train op.
     self.train_op = tf.group(apply_gradient_op, variables_averages_op,batchnorm_updates_op)
+
+    for var in tf.trainable_variables():
+      tf.summary.histogram(var.op.name, var)
+
+    # Add histograms for gradients.
+    for grad, var in grads:
+      if grad is not None:
+        tf.summary.histogram(var.op.name + '/gradients', grad)
+      
+
 
 
   def train(self):
