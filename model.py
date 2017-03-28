@@ -5,10 +5,10 @@ import h5py
 import time
 import sys
 
-tf.app.flags.DEFINE_string('train_dir', 'events_summary/run_4',
+tf.app.flags.DEFINE_string('train_dir', 'events_summary/run_10',
                            """Directory where to write event logs """
                            """and checkpoint.""")
-tf.app.flags.DEFINE_integer('max_steps', 20000,
+tf.app.flags.DEFINE_integer('max_steps', 200000,
                             """Number of batches to run.""")
 tf.app.flags.DEFINE_integer('num_gpus', 1,
                             """How many GPUs to use.""")
@@ -62,6 +62,8 @@ class RegressionModel:
     """
     Define model architecture
     """
+    self.images = images
+
     tf.summary.image("local",tf.expand_dims(images[:,:,:,0],-1))
     tf.summary.image("prior",tf.expand_dims(images[:,:,:,1],-1))
     self.conv1 =  self.conv_layer(images, 2, 32, "conv1",filter_size=5,padding="SAME")
@@ -78,23 +80,36 @@ class RegressionModel:
 
     self.fc_1 = self.fc_layer(self.conv2,125*125*32,3,"fc")
     # print(self.fc_1.get_shape())
-
+    self.output = self.fc_1
 
 
   def inference(self,images):
     self.build(images)
     print "______________________________"
     print "Network Built"
-    return self.fc_1
+    return self.output
 
 
 
   def loss(self,output,label):
     with tf.variable_scope("lossss"):
+      self.label = label
     # tf.add_to_collection('losses', cross_entropy_mean)
-      squared_error = tf.losses.mean_squared_error(output , label)
+      # squared_error = tf.losses.mean_squared_error(output , label)
+      weights = [1 ,1, 1]
+      x_error = tf.reduce_mean( tf.square(output[:,0] - label[:,0]) )
+      y_error = tf.reduce_mean( tf.square(output[:,1] - label[:,1]) )
+      theta_error1 =  tf.minimum( tf.square(output[:,2] - label[:,2]),tf.square(output[:,2] + 3.6 - label[:,2])  ) 
+      theta_error1 =  tf.minimum( theta_error1 ,tf.square(output[:,2] - 3.6 - label[:,2])  ) 
+      theta_error=  tf.reduce_mean( theta_error1 ) 
+          
+      tf.summary.scalar("x_error",x_error)
+      tf.summary.scalar("y_error",y_error)
+      tf.summary.scalar("theta_error",theta_error)
+      
+      weighted_error = weights[0]*x_error + weights[1]*y_error + weights[2]*theta_error
+      tf.add_to_collection('losses', weighted_error)
 
-      tf.add_to_collection('losses', squared_error)
 
     return tf.add_n(tf.get_collection('losses'), name='total_loss')
 
@@ -148,7 +163,15 @@ class RegressionModel:
     for grad, var in grads:
       if grad is not None:
         tf.summary.histogram(var.op.name + '/gradients', grad)
-      
+    with tf.variable_scope("stats"):
+      with tf.variable_scope("outputs"):
+        tf.summary.histogram("x_outputs", self.output[:,0])
+        tf.summary.histogram("y_outputs", self.output[:,1])
+        tf.summary.histogram("theta_outputs", self.output[:,2])
+      with tf.variable_scope("inputs"):
+        tf.summary.histogram("x_inputs", self.label[:,0])
+        tf.summary.histogram("y_inputs", self.label[:,1])
+        tf.summary.histogram("theta_inputs", self.label[:,2])
 
 
 
@@ -284,11 +307,17 @@ class RegressionModel:
         sys.exit()
     self.local_map = b['local_map'][:num_items/20]
     self.prior_map = b['prior_map'][:num_items]
-    self.output = b['output'][:num_items]
+    self.truth_label = b['output'][:num_items]
+    self.truth_label = self.truth_label.astype(np.float32, copy=False)
+
+    self.truth_label[:,0] =self.truth_label[:,0]/100 
+    self.truth_label[:,1] =self.truth_label[:,1]/100 
+    self.truth_label[:,2] =self.truth_label[:,2]/100 
+
     self.num_items = num_items
     print  "local_map shape " , self.local_map.shape
     print "prior_map shape " , self.prior_map.shape
-    print "outputs shape " , self.output.shape
+    print "outputs shape " , self.truth_label.shape
     print "Num of examples(augmented)" , self.num_items
 
   def load_minibatch(self, indices):
@@ -298,7 +327,7 @@ class RegressionModel:
     for counter, i in enumerate(indices):
       images[counter,:,:,0] = np.pad(np.reshape(self.local_map[i/20],(200,200) ),[[150,150],[150,150]],'constant', constant_values=(0, 0)) 
       images[counter,:,:,1] = np.reshape(self.prior_map[i],(500,500) )
-      output[counter,:] = self.output[i]
+      output[counter,:] = self.truth_label[i]
     return images,output
 
 
