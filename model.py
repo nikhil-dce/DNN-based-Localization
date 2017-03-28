@@ -5,7 +5,7 @@ import h5py
 import time
 import sys
 
-tf.app.flags.DEFINE_string('train_dir', 'events_summary/run_1',
+tf.app.flags.DEFINE_string('train_dir', 'events_summary/run_3',
                            """Directory where to write event logs """
                            """and checkpoint.""")
 tf.app.flags.DEFINE_integer('max_steps', 20000,
@@ -173,7 +173,7 @@ class RegressionModel:
 
     summary_writer = tf.summary.FileWriter(FLAGS.train_dir, sess.graph)
     meta_graph_def = tf.train.export_meta_graph(filename=FLAGS.train_dir+'/my-model.meta')
-    self.load_dataset()
+    self.load_dataset(num_items=10000)
     print("GRAPH IS  SAVED")
     self.indices = np.arange(self.num_items)
     np.random.shuffle(self.indices)
