@@ -24,7 +24,7 @@ NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = 30
 MOVING_AVERAGE_DECAY = 0.9999  # The decay to use for the moving average.
 NUM_EPOCHS_PER_DECAY = 350.0    # Epochs after which learning rate decays.
 LEARNING_RATE_DECAY_FACTOR = 0.1# Learning rate decay factor.
-INITIAL_LEARNING_RATE = 1e-6   # Initial learning rate.
+INITIAL_LEARNING_RATE = 1e-5   # Initial learning rate.
 # INITIAL_LEARNING_RATE_ADAM = 1e-4   # Initial learning rate.
 
 # If a model is trained with multiple GPUs, prefix all Op names with tower_name
@@ -110,6 +110,11 @@ class RegressionModel:
       weighted_error = weights[0]*x_error + weights[1]*y_error + weights[2]*theta_error
       tf.add_to_collection('losses', weighted_error)
 
+      # beta = 0.001
+      # lossL2 = tf.add_n([ tf.nn.l2_loss(v) for v in vars
+      #               if 'bias' not in v.name ]) * beta
+      # Add L2 loss later in the future
+
 
     return tf.add_n(tf.get_collection('losses'), name='total_loss')
 
@@ -163,15 +168,15 @@ class RegressionModel:
     for grad, var in grads:
       if grad is not None:
         tf.summary.histogram(var.op.name + '/gradients', grad)
-    with tf.variable_scope("stats"):
-      with tf.variable_scope("outputs"):
-        tf.summary.histogram("x_outputs", self.output[:,0])
-        tf.summary.histogram("y_outputs", self.output[:,1])
-        tf.summary.histogram("theta_outputs", self.output[:,2])
-      with tf.variable_scope("inputs"):
-        tf.summary.histogram("x_inputs", self.label[:,0])
-        tf.summary.histogram("y_inputs", self.label[:,1])
-        tf.summary.histogram("theta_inputs", self.label[:,2])
+    # with tf.variable_scope("stats"):
+    with tf.variable_scope("outputs"):
+      tf.summary.histogram("x_outputs", self.output[:,0])
+      tf.summary.histogram("y_outputs", self.output[:,1])
+      tf.summary.histogram("theta_outputs", self.output[:,2])
+    with tf.variable_scope("inputs"):
+      tf.summary.histogram("x_inputs", self.label[:,0])
+      tf.summary.histogram("y_inputs", self.label[:,1])
+      tf.summary.histogram("theta_inputs", self.label[:,2])
 
 
 
