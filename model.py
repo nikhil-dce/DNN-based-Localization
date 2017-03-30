@@ -5,6 +5,9 @@ import h5py
 import time
 import sys
 import re
+import os
+
+os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,2'
 
 NUMBER_GPU = 2
 
@@ -15,7 +18,7 @@ tf.app.flags.DEFINE_integer('max_steps', 200000,
                             """Number of batches to run.""")
 tf.app.flags.DEFINE_integer('num_gpus', NUMBER_GPU,
                             """How many GPUs to use.""")
-tf.app.flags.DEFINE_integer('batch_size', 4,
+tf.app.flags.DEFINE_integer('batch_size', 16,
                            """Number of images to process in a batch.""")
 tf.app.flags.DEFINE_integer('save_pred_every', 2,
                            """Save summary frequency""")
@@ -30,7 +33,7 @@ NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = 30
 MOVING_AVERAGE_DECAY = 0.9999  # The decay to use for the moving average.
 NUM_EPOCHS_PER_DECAY = 350.0    # Epochs after which learning rate decays.
 LEARNING_RATE_DECAY_FACTOR = 0.1# Learning rate decay factor.
-INITIAL_LEARNING_RATE = 1e-5   # Initial learning rate.
+INITIAL_LEARNING_RATE = 1e-6   # Initial learning rate.
 # INITIAL_LEARNING_RATE_ADAM = 1e-4   # Initial learning rate.
 
 # If a model is trained with multiple GPUs, prefix all Op names with tower_name
@@ -124,63 +127,6 @@ class RegressionModel:
                
           return tf.add_n(tf.get_collection('losses'), name='total_loss')
 
-     def return_train_op(self,total_loss, global_step):
-
-          """Create an optimizer and apply to all trainable variables. Add moving
-          average for all trainable variables.
-          Args:
-          total_loss: Total loss from loss().
-          global_step: Integer Variable counting the number of training steps
-          processed.
-          Returns:
-          train_op: op for training.
-          """
-          
-          # Calculate the learning rate schedule.
-          num_batches_per_epoch = (NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN /
-                             FLAGS.batch_size)
-          decay_steps = int(num_batches_per_epoch * NUM_EPOCHS_PER_DECAY)
-
-          # Decay the learning rate exponentially based on the number of steps.
-          lr = tf.train.exponential_decay(INITIAL_LEARNING_RATE,
-                                    global_step,
-                                    decay_steps,
-                                    LEARNING_RATE_DECAY_FACTOR,
-                                    staircase=True)
-
-          opt = tf.train.GradientDescentOptimizer(INITIAL_LEARNING_RATE)
-          batchnorm_updates = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-          grads = opt.compute_gradients(total_loss)
-          tf.summary.scalar('learning_rate', lr)
-
-          apply_gradient_op = opt.apply_gradients(grads, global_step=global_step)
-          variable_averages = tf.train.ExponentialMovingAverage(MOVING_AVERAGE_DECAY, global_step)
-          variables_averages_op = variable_averages.apply(tf.trainable_variables())
-
-          batchnorm_updates_op = tf.group(*batchnorm_updates)
-
-          # Group all updates to into a single train op.
-          self.train_op = tf.group(apply_gradient_op, variables_averages_op,batchnorm_updates_op)
-
-          for var in tf.trainable_variables():
-               tf.summary.histogram(var.op.name, var)
-
-          # Add histograms for gradients.
-          for grad, var in grads:
-               if grad is not None:
-                    tf.summary.histogram(var.op.name + '/gradients', grad)
-
-          # with tf.variable_scope("stats"):
-          with tf.variable_scope("outputs"):
-               tf.summary.histogram("x_outputs", self.output[:,0])
-               tf.summary.histogram("y_outputs", self.output[:,1])
-               tf.summary.histogram("theta_outputs", self.output[:,2])
-          with tf.variable_scope("inputs"):
-               tf.summary.histogram("x_inputs", self.label[:,0])
-               tf.summary.histogram("y_inputs", self.label[:,1])
-               tf.summary.histogram("theta_inputs", self.label[:,2])
-
-
      def get_placeholders(self):
 
           image_multigpu_placeholders = []
@@ -206,23 +152,7 @@ class RegressionModel:
           print images
           output = self.inference(images)
           
-          _ = self.loss(output, label)
-          # Build the portion of the Graph calculating the losses. Note that we will
-          # assemble the total_loss using a custom function below.
-
-          # Assemble all of the losses for the current tower only.
-          losses = tf.get_collection('losses', scope)
-
-          # Calculate the total loss for the current tower.
-          total_loss = tf.add_n(losses, name='total_loss')
-
-          # Attach a scalar summary to all individual losses and the total loss; do the
-          # same for the averaged version of the losses.
-          for l in losses + [total_loss]:
-               # Remove 'tower_[0-9]/' from the name in case this is a multi-GPU training
-               # session. This helps the clarity of presentation on tensorboard.
-               loss_name = re.sub('%s_[0-9]*/' % TOWER_NAME, '', l.op.name)
-               tf.summary.scalar(loss_name, l)
+          total_loss = self.loss(output, label)
 
           # using self.output will give last gpu outputs only
           with tf.variable_scope("outputs"):
@@ -336,17 +266,18 @@ class RegressionModel:
 
                #self.return_train_op(total_loss,global_step)
 
+	       
                # Add histograms for gradients.
                for grad, var in grads:
                     if grad is not None:
                          summaries.append(tf.summary.histogram(var.op.name + '/gradients', grad))
-
+	       
                # Apply the gradients to adjust the shared variables.
                apply_gradient_op = opt.apply_gradients(grads, global_step=global_step)    
 
                # Add histograms for trainable variables.
                for var in tf.trainable_variables():
-                    summaries.append(tf.summary.histogram(var.op.name, var))
+                   summaries.append(tf.summary.histogram(var.op.name, var))
 
                # Track the moving averages of all trainable variables
                variable_averages = tf.train.ExponentialMovingAverage(MOVING_AVERAGE_DECAY, global_step)
@@ -359,7 +290,7 @@ class RegressionModel:
 
                saver = tf.train.Saver(tf.global_variables())
                # Build the summary operation from the last tower summaries.
-               summary_op = tf.summary.merge_all()
+               summary_op = tf.summary.merge(summaries)
 
                init = tf.global_variables_initializer()
 
@@ -420,7 +351,7 @@ class RegressionModel:
           if counter_end > counter_start:
                batch_indices = self.indices[counter_start : counter_end    ]
           else:
-               batch_indices = np.zeros(FLAGS.batch_size, dtype = np.int)
+               batch_indices = np.zeros(FLAGS.num_gpus * FLAGS.batch_size, dtype = np.int)
                batch_indices[:counter_end] = self.indices[ : counter_end    ]
                batch_indices[counter_end:] = self.indices[:-counter_start    ]
 
