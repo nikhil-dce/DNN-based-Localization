@@ -12,7 +12,7 @@ os.environ["CUDA_VISIBLE_DEVICES"]="3"
 NUMBER_GPU = 1
 #gpus = [3]
 
-tf.app.flags.DEFINE_string('train_dir', '/media/data_raid/nikhil/events_summary/run_3',
+tf.app.flags.DEFINE_string('train_dir', '/media/data_raid/nikhil/events_summary/run_4',
                            """Directory where to write event logs """
                            """and checkpoint.""")
 tf.app.flags.DEFINE_integer('max_steps', 200000,
@@ -25,7 +25,7 @@ tf.app.flags.DEFINE_integer('save_pred_every', 2,
                            """Save summary frequency""")
 tf.app.flags.DEFINE_integer('print_pred_every', 20,
                            """Print loss every steps""")
-tf.app.flags.DEFINE_integer('save_valid_every', 20,
+tf.app.flags.DEFINE_integer('save_valid_every', 1000,
                             """Save Validation summary""")
 
 PRIOR_SIZE = 500
@@ -36,7 +36,7 @@ NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = 30
 MOVING_AVERAGE_DECAY = 0.9999  # The decay to use for the moving average.
 NUM_EPOCHS_PER_DECAY = 350.0    # Epochs after which learning rate decays.
 LEARNING_RATE_DECAY_FACTOR = 0.1# Learning rate decay factor.
-INITIAL_LEARNING_RATE = 1e-6   # Initial learning rate.
+INITIAL_LEARNING_RATE = 1e-5   # Initial learning rate.
 # INITIAL_LEARNING_RATE_ADAM = 1e-4   # Initial learning rate.
 
 # If a model is trained with multiple GPUs, prefix all Op names with tower_name
