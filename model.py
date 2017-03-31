@@ -7,8 +7,9 @@ import sys
 import re
 import os
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,2,3'
-NUMBER_GPU = 3
+os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   # see issue #152
+os.environ["CUDA_VISIBLE_DEVICES"]="3"
+NUMBER_GPU = 1
 #gpus = [3]
 
 tf.app.flags.DEFINE_string('train_dir', '/media/data_raid/nikhil/events_summary/run_3',
@@ -402,28 +403,18 @@ class RegressionModel:
                               vx_loss.append(vx_sum)
                               vy_loss.append(vy_sum)
                               vtheta_loss.append(vtheta_sum)
+                                                                           
+                         sx = sum(vx_loss) / self.test_items
+                         sy = sum(vy_loss) / self.test_items
+                         stheta = sum(vtheta_loss) / self.test_items
                          
-                         print 'Validation...'
-                         
-                         #vxerror = tf.divide(tf.add_n(vx_loss), self.test_items)
-                         #vyerror = tf.divide(tf.add_n(vy_loss), self.test_items)
-                         #vthetaerror = tf.divide(tf.add_n(vtheta_loss), self.test_items)
-                         
-                         print 'Validation2...'
-                         print len(vx_loss)
-                         print vx_sum.shape
-
-                         sx = sum(vx_loss)
-                         sy = sum(vy_loss)
-                         stheta = sum(vtheta_loss)
-                         
-                         feed_dict = {validation_summary_x:(sx/self.test_items), validation_summary_y:(sy/self.test_items), validation_summary_theta:(stheta/self.test_items)}
-                         print 'Validation3...'
+                         feed_dict = {validation_summary_x:(sx), validation_summary_y:(sy), validation_summary_theta:(stheta)}
+                         print 'Validation Summary X_loss {:.3f}, \t YLoss {:.3f}, \t ThetaLoss {:.3f}'.format(sx, sy, stheta)
                          validation_summary = sess.run(validation_summary_op, feed_dict=feed_dict)
-                         print 'Validation4...'
                          summary_writer.add_summary(validation_summary, step)
                          
                     duration = time.time() - start_time
+                    # Now duration also includes the validation time...
                     if step % FLAGS.print_pred_every == 0:
                          print('step {:d} \t loss = {:.3f}, ({:.3f} sec/step)'.format(step, loss_value, duration))
 
