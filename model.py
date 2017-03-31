@@ -7,23 +7,25 @@ import sys
 import re
 import os
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,2'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,2,3'
+NUMBER_GPU = 3
+#gpus = [3]
 
-NUMBER_GPU = 2
-
-tf.app.flags.DEFINE_string('train_dir', '/media/data_raid/nikhil/events_summary/run_2',
+tf.app.flags.DEFINE_string('train_dir', '/media/data_raid/nikhil/events_summary/run_3',
                            """Directory where to write event logs """
                            """and checkpoint.""")
 tf.app.flags.DEFINE_integer('max_steps', 200000,
                             """Number of batches to run.""")
 tf.app.flags.DEFINE_integer('num_gpus', NUMBER_GPU,
                             """How many GPUs to use.""")
-tf.app.flags.DEFINE_integer('batch_size', 16,
+tf.app.flags.DEFINE_integer('batch_size', 20,
                            """Number of images to process in a batch.""")
 tf.app.flags.DEFINE_integer('save_pred_every', 2,
                            """Save summary frequency""")
 tf.app.flags.DEFINE_integer('print_pred_every', 20,
                            """Print loss every steps""")
+tf.app.flags.DEFINE_integer('save_valid_every', 20,
+                            """Save Validation summary""")
 
 PRIOR_SIZE = 500
 LOCAL_SIZE = 200
@@ -54,21 +56,24 @@ class batch_norm(object):
             self.momentum = momentum
             self.name = name
 
-    def __call__(self, x, train=True):
+    def __call__(self, x, phase):
          return tf.contrib.layers.batch_norm(x,
                                             decay=self.momentum, 
                                             epsilon=self.epsilon,
                                             scale=True,
-                                            is_training=train,
+                                            is_training=phase,
                                             scope=self.name)
 
 class RegressionModel:
 
      def __init__(self,  trainable=True):
           self.trainable = trainable
+          # these will change at the time of load_dataset
+          self.train_items = 500
+          self.test_items = 200
 
 
-     def build(self, images):
+     def build(self, images, phase):
 
           """
           Define model architecture
@@ -77,14 +82,14 @@ class RegressionModel:
           tf.summary.image("local",tf.expand_dims(images[:,:,:,0],-1))
           tf.summary.image("prior",tf.expand_dims(images[:,:,:,1],-1))
           self.conv1 =  self.conv_layer(images, 2, 32, "conv1",filter_size=5,padding="SAME")
-          self.conv1 =  batch_norm(name='bn_conv1')(self.conv1)
+          self.conv1 =  batch_norm(name='bn_conv1')(self.conv1, phase)
           self.conv1 = self.max_pool(self.conv1,"max_pool_1")
 
           print(self.conv1.get_shape())
 
 
           self.conv2 =  self.conv_layer(self.conv1, 32, 32, "conv2",filter_size=5,padding="SAME")
-          self.conv2 =  batch_norm(name='bn_conv2')(self.conv2)
+          self.conv2 =  batch_norm(name='bn_conv2')(self.conv2, phase)
           self.conv2 = self.max_pool(self.conv2,"max_pool_2")
           # print(self.conv2.get_shape())
 
@@ -92,53 +97,59 @@ class RegressionModel:
           # print(self.fc_1.get_shape())
           self.output = self.fc_1
 
-     def inference(self,images):
-          self.build(images)
+     def inference(self,images,phase):
+          self.build(images,phase)
           print "______________________________"
           print "Network Built"
           return self.output
 
-
-
      def loss(self, output, label):
 
+          self.label = label
+          # squared_error = tf.losses.mean_squared_error(output , label)
+          weights = [1 ,1, 1]
+
+          # will return total batch error -> needed in validation case
+          xerror_batch = tf.square(output[:,0] - label[:,0])
+          yerror_batch = tf.square(output[:,1] - label[:,1])
+          theta_error1 =  tf.minimum( tf.square(output[:,2] - label[:,2]), tf.square(output[:,2] + 3.6 - label[:,2])  ) 
+          theta_error1 =  tf.minimum( theta_error1 , tf.square(output[:,2] - 3.6 - label[:,2])  )
+               
+          x_error = tf.reduce_mean(xerror_batch)
+          y_error = tf.reduce_mean(yerror_batch)
+          theta_error=  tf.reduce_mean( theta_error1 ) 
+          weighted_error = weights[0]*x_error + weights[1]*y_error + weights[2]*theta_error
+                         
           with tf.variable_scope("output_loss"):
-               self.label = label
-    
-               # squared_error = tf.losses.mean_squared_error(output , label)
-               weights = [1 ,1, 1]
-               x_error = tf.reduce_mean( tf.square(output[:,0] - label[:,0]) )
-               y_error = tf.reduce_mean( tf.square(output[:,1] - label[:,1]) )
-               theta_error1 =  tf.minimum( tf.square(output[:,2] - label[:,2]), tf.square(output[:,2] + 3.6 - label[:,2])  ) 
-               theta_error1 =  tf.minimum( theta_error1 , tf.square(output[:,2] - 3.6 - label[:,2])  ) 
-               theta_error=  tf.reduce_mean( theta_error1 ) 
-          
                tf.summary.scalar("x_error", x_error)
                tf.summary.scalar("y_error", y_error)
                tf.summary.scalar("theta_error", theta_error)
-      
-               weighted_error = weights[0]*x_error + weights[1]*y_error + weights[2]*theta_error
                tf.add_to_collection('losses', weighted_error)
-
                # beta = 0.001
                # lossL2 = tf.add_n([ tf.nn.l2_loss(v) for v in vars
                # if 'bias' not in v.name ]) * beta
                # Add L2 loss later in the future
                
-          return tf.add_n(tf.get_collection('losses'), name='total_loss')
+          return tf.add_n(tf.get_collection('losses'), name='total_loss'), tf.reduce_sum(xerror_batch), tf.reduce_sum(yerror_batch), tf.reduce_sum(theta_error1)
 
      def get_placeholders(self):
 
           image_multigpu_placeholders = []
           label_multigpu_placeholders = []
 
+          phase = tf.placeholder(tf.bool, name='phase')
+
+          validation_summary_x = tf.placeholder(tf.float32)
+          validation_summary_y = tf.placeholder(tf.float32)
+          validation_summary_theta = tf.placeholder(tf.float32)
+          
           for i in range(FLAGS.num_gpus):
                image_multigpu_placeholders.append(tf.placeholder(tf.float32, shape=(FLAGS.batch_size, PRIOR_SIZE, PRIOR_SIZE, 2)))
                label_multigpu_placeholders.append(tf.placeholder(tf.float32, shape=(FLAGS.batch_size, 3)))
           
-          return image_multigpu_placeholders, label_multigpu_placeholders
+          return image_multigpu_placeholders, label_multigpu_placeholders, phase, validation_summary_x, validation_summary_y, validation_summary_theta
 
-     def tower_loss(self, images, label, scope):
+     def tower_loss(self, images, label, scope, phase):
 
           """Calculate the total loss on a single tower running the model.
           Args:
@@ -148,12 +159,10 @@ class RegressionModel:
           Returns:
           Tensor of shape [] containing the total loss for a batch of data
           """
-
-          print images
-          output = self.inference(images)
+          output = self.inference(images, phase)
           
-          total_loss = self.loss(output, label)
-
+          total_loss, xloss, yloss, thetaloss = self.loss(output, label)
+          
           # using self.output will give last gpu outputs only
           with tf.variable_scope("outputs"):
                tf.summary.histogram("x_outputs", output[:,0])
@@ -164,7 +173,7 @@ class RegressionModel:
                tf.summary.histogram("y_inputs", label[:,1])
                tf.summary.histogram("theta_inputs", label[:,2])
 
-          return total_loss
+          return total_loss, xloss, yloss, thetaloss
 
      def average_gradients(self, tower_grads):
 
@@ -224,20 +233,29 @@ class RegressionModel:
                # Calculate gradients for each model tower
                tower_grads = []
 
-               images_multigpu, labels_multigpu = self.get_placeholders()
-               print len(images_multigpu)
+               validation_xerror = []
+               validation_yerror = []
+               validation_thetaerror = []
+               
+               images_multigpu, labels_multigpu, phase, validation_summary_x, validation_summary_y, validation_summary_theta = self.get_placeholders()
+               
                #split_images = tf.spliti(images, FLAGS.num_gpus, axis=0)
                #split_labelss = tf.split(labels, FLAGS.num_gpus, axis=0)
                
                with tf.variable_scope(tf.get_variable_scope()):
                     for i in xrange(FLAGS.num_gpus):
+                    #for i in xrange(len(gpus)):
                          with tf.device('/gpu:%d' % i):
                               with tf.name_scope('%s_%d' % (TOWER_NAME, i)) as scope:
                                    # Calculate the loss for one tower of the model. This function
                                    # constructs the entire model but shares the variables across
                                    # all towers.
                                    
-                                   loss = self.tower_loss(images_multigpu[i], labels_multigpu[i], scope)
+                                   loss, xbatch_loss, ybatch_loss, thetabatch_loss = self.tower_loss(images_multigpu[i], labels_multigpu[i], scope, phase)
+                                                                      
+                                   validation_xerror.append(xbatch_loss)
+                                   validation_yerror.append(ybatch_loss)
+                                   validation_thetaerror.append(thetabatch_loss)
                                    
                                    # Reuse variables for the next tower.
                                    tf.get_variable_scope().reuse_variables()
@@ -256,6 +274,11 @@ class RegressionModel:
 
                                    # Keep track of the gradients across all towers.
                                    tower_grads.append(grads)
+               
+               with tf.device('/cpu:0'):
+                    vxerror = tf.add_n(validation_xerror)
+                    vyerror = tf.add_n(validation_yerror)
+                    vthetaerror = tf.add_n(validation_thetaerror)
 
                # We must calculate the mean of each gradient. Note that this is the
                # synchronization point across all towers.
@@ -265,7 +288,6 @@ class RegressionModel:
                summaries.append(tf.summary.scalar('learning_rate', lr))
 
                #self.return_train_op(total_loss,global_step)
-
 	       
                # Add histograms for gradients.
                for grad, var in grads:
@@ -292,6 +314,16 @@ class RegressionModel:
                # Build the summary operation from the last tower summaries.
                summary_op = tf.summary.merge(summaries)
 
+               # Validation Summaries from placeholders
+               validation_summaries = []
+               with tf.name_scope('validation'):
+                    validation_summaries.append(tf.summary.scalar('xerror', validation_summary_x))
+                    validation_summaries.append(tf.summary.scalar('yerror', validation_summary_y))
+                    validation_summaries.append(tf.summary.scalar('theta_error', validation_summary_theta))
+                         
+               validation_summary_op = tf.summary.merge(validation_summaries)
+
+               
                init = tf.global_variables_initializer()
 
                config = tf.ConfigProto()
@@ -307,7 +339,7 @@ class RegressionModel:
 
                summary_writer = tf.summary.FileWriter(FLAGS.train_dir, sess.graph)
                meta_graph_def = tf.train.export_meta_graph(filename=FLAGS.train_dir+'/my-model.meta')
-               self.load_dataset(num_items=10000)
+               self.load_dataset(num_items=15000, test_items = 1000)
                print("GRAPH IS  SAVED")
                self.indices = np.arange(self.num_items)
                np.random.shuffle(self.indices)
@@ -327,18 +359,70 @@ class RegressionModel:
 
                     feed_dict = {}
                     for gpu_index in range(FLAGS.num_gpus):
-                         feed_dict[images_multigpu[gpu_index] ] = minibatch[0][i]
-                         feed_dict[labels_multigpu[gpu_index] ] = minibatch[1][i]
+                         feed_dict[images_multigpu[gpu_index] ] = minibatch[0][gpu_index]
+                         feed_dict[labels_multigpu[gpu_index] ] = minibatch[1][gpu_index]
                       
                     #feed_dict = { images : minibatch[0], label:minibatch[1]}
         
                     if step % FLAGS.save_pred_every == 0:
+                         feed_dict[phase] = True
                          loss_value,_, summary = sess.run([loss, self.train_op , summary_op], feed_dict=feed_dict)
                          summary_writer.add_summary(summary, step)
                          # save(saver, sess, args.snapshot_dir, step)
                     else:
+                         feed_dict[phase] = True
                          loss_value, _ = sess.run([loss, self.train_op], feed_dict=feed_dict)
-             
+
+                    if step % FLAGS.save_valid_every == 0:
+                         
+                         testbatch = self.load_testbatch()
+                         items_per_gpu = self.test_items / FLAGS.num_gpus
+                         total_test_batch = items_per_gpu /  FLAGS.batch_size;
+
+                         vx_loss = []
+                         vy_loss = []
+                         vtheta_loss = []
+
+                         for batch_index in range(total_test_batch):
+                         
+                              feed_dict = {}
+
+                              baseIndex = batch_index * FLAGS.batch_size
+                              if baseIndex + FLAGS.batch_size > items_per_gpu:
+                                   endIndex = items_per_gpu
+                              else:
+                                   endIndex = baseIndex+FLAGS.batch_size
+
+                              for gpu_index in range(FLAGS.num_gpus):
+                                   feed_dict[images_multigpu[gpu_index] ] = testbatch[0][gpu_index][baseIndex:endIndex]
+                                   feed_dict[labels_multigpu[gpu_index] ] = testbatch[1][gpu_index][baseIndex:endIndex]
+                              
+                              feed_dict[phase] = False
+                              vx_sum,vy_sum,vtheta_sum = sess.run([vxerror, vyerror, vthetaerror], feed_dict=feed_dict)
+                              vx_loss.append(vx_sum)
+                              vy_loss.append(vy_sum)
+                              vtheta_loss.append(vtheta_sum)
+                         
+                         print 'Validation...'
+                         
+                         #vxerror = tf.divide(tf.add_n(vx_loss), self.test_items)
+                         #vyerror = tf.divide(tf.add_n(vy_loss), self.test_items)
+                         #vthetaerror = tf.divide(tf.add_n(vtheta_loss), self.test_items)
+                         
+                         print 'Validation2...'
+                         print len(vx_loss)
+                         print vx_sum.shape
+
+                         sx = sum(vx_loss)
+                         sy = sum(vy_loss)
+                         stheta = sum(vtheta_loss)
+                         
+                         feed_dict = {validation_summary_x:(sx/self.test_items), validation_summary_y:(sy/self.test_items), validation_summary_theta:(stheta/self.test_items)}
+                         print 'Validation3...'
+                         validation_summary = sess.run(validation_summary_op, feed_dict=feed_dict)
+                         print 'Validation4...'
+                         summary_writer.add_summary(validation_summary, step)
+                         
                     duration = time.time() - start_time
                     if step % FLAGS.print_pred_every == 0:
                          print('step {:d} \t loss = {:.3f}, ({:.3f} sec/step)'.format(step, loss_value, duration))
@@ -411,14 +495,22 @@ class RegressionModel:
 
           return weights, biases
 
-     def load_dataset(self,hdf5Filename="/media/data_raid/dnn_localization/localization_dataset/annarbor_dataset_dnn.hdf5",num_items=100):
+     def load_dataset(self,hdf5Filename="/media/data_raid/dnn_localization/localization_dataset/annarbor_dataset_dnn.hdf5",num_items=500,test_items=200):
           b = h5py.File(hdf5Filename,"r")
           if not num_items:
                num_items = b['prior_map'].shape[0]
                if num_items%20:
-
                     print "Error"
                     sys.exit()
+
+          self.test_local = b['local_map'][num_items/20:int((num_items+test_items)/20)]
+          self.test_prior = b['prior_map'][num_items:(num_items+test_items)]
+          self.test_label = b['output'][num_items:(num_items+test_items)]
+          self.test_label = self.test_label.astype(np.float32, copy=False)
+
+          self.test_label[:,0] = self.test_label[:,0]/100
+          self.test_label[:,1] = self.test_label[:,1]/100
+          self.test_label[:,2] = self.test_label[:,2]/100
 
           self.local_map = b['local_map'][:num_items/20]
           self.prior_map = b['prior_map'][:num_items]
@@ -429,11 +521,14 @@ class RegressionModel:
           self.truth_label[:,1] =self.truth_label[:,1]/100 
           self.truth_label[:,2] =self.truth_label[:,2]/100 
 
+          self.test_items = test_items
           self.num_items = num_items
+          
           print  "local_map shape " , self.local_map.shape
           print "prior_map shape " , self.prior_map.shape
           print "outputs shape " , self.truth_label.shape
-          print "Num of examples(augmented)" , self.num_items
+          print "Num of examples(augmented) " , self.num_items
+          print "Test examples ", self.test_items
 
      def load_minibatch(self, indices):
 
@@ -453,6 +548,24 @@ class RegressionModel:
 
           return images,output
 
+     def load_testbatch(self):
+
+          images = np.zeros( (FLAGS.num_gpus, self.test_items / FLAGS.num_gpus, PRIOR_SIZE, PRIOR_SIZE, 2 ) )
+          output = np.zeros( (FLAGS.num_gpus, self.test_items / FLAGS.num_gpus, 3 ) )
+          padding = (PRIOR_SIZE - LOCAL_SIZE) / 2
+          batch_per_gpu = self.test_items / FLAGS.num_gpus
+
+          for gpu_index in range(FLAGS.num_gpus):
+               for counter in range(batch_per_gpu):
+                    baseIndex = batch_per_gpu * gpu_index # picking test data after train indices
+                    prior_map_index = baseIndex + counter
+                    local_map_index = prior_map_index / 20
+
+                    images[gpu_index,counter,:,:,0] = np.pad(np.reshape(self.test_local[local_map_index], (LOCAL_SIZE, LOCAL_SIZE) ), [[padding, padding], [padding, padding]],'constant', constant_values=(0,0))
+                    images[gpu_index,counter,:,:,1] = np.reshape(self.test_prior[prior_map_index], (PRIOR_SIZE,PRIOR_SIZE) )
+                    output[gpu_index,counter,:] = self.test_label[prior_map_index]
+
+          return images, output
 
 
 
