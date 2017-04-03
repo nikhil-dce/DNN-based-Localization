@@ -8,18 +8,18 @@ import re
 import os
 
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   # see issue #152
-os.environ["CUDA_VISIBLE_DEVICES"]="3"
-NUMBER_GPU = 1
+os.environ["CUDA_VISIBLE_DEVICES"]="0,1,2"
+NUMBER_GPU = 3
 #gpus = [3]
 
-tf.app.flags.DEFINE_string('train_dir', '/media/data_raid/nikhil/events_summary/run_4',
+tf.app.flags.DEFINE_string('train_dir', '/media/data_raid/nikhil/events_summary/run_5',
                            """Directory where to write event logs """
                            """and checkpoint.""")
 tf.app.flags.DEFINE_integer('max_steps', 200000,
                             """Number of batches to run.""")
 tf.app.flags.DEFINE_integer('num_gpus', NUMBER_GPU,
                             """How many GPUs to use.""")
-tf.app.flags.DEFINE_integer('batch_size', 20,
+tf.app.flags.DEFINE_integer('batch_size', 16,
                            """Number of images to process in a batch.""")
 tf.app.flags.DEFINE_integer('save_pred_every', 2,
                            """Save summary frequency""")
@@ -36,7 +36,7 @@ NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = 30
 MOVING_AVERAGE_DECAY = 0.9999  # The decay to use for the moving average.
 NUM_EPOCHS_PER_DECAY = 350.0    # Epochs after which learning rate decays.
 LEARNING_RATE_DECAY_FACTOR = 0.1# Learning rate decay factor.
-INITIAL_LEARNING_RATE = 1e-5   # Initial learning rate.
+INITIAL_LEARNING_RATE = 1e-6   # Initial learning rate.
 # INITIAL_LEARNING_RATE_ADAM = 1e-4   # Initial learning rate.
 
 # If a model is trained with multiple GPUs, prefix all Op names with tower_name
@@ -51,14 +51,16 @@ def lrelu(x, leak=0.2, name="lrelu"):
          return f1 * x + f2 * abs(x)
 
 class batch_norm(object):
-    def __init__(self, epsilon=1e-5, momentum = 0.99, name="batch_norm"):
-        with tf.variable_scope(name), tf.device('/cpu:0'):
-            self.epsilon  = epsilon
-            self.momentum = momentum
-            self.name = name
+     
+     #def __init__(self, epsilon=1e-5, momentum = 0.99, name="batch_norm"):
+     def __init__(self, epsilon=1e-5, momentum = 0.9, name="batch_norm"):
+          with tf.variable_scope(name), tf.device('/cpu:0'):
+               self.epsilon  = epsilon
+               self.momentum = momentum
+               self.name = name
 
-    def __call__(self, x, phase):
-         return tf.contrib.layers.batch_norm(x,
+     def __call__(self, x, phase):
+          return tf.contrib.layers.batch_norm(x,
                                             decay=self.momentum, 
                                             epsilon=self.epsilon,
                                             scale=True,
@@ -201,16 +203,16 @@ class RegressionModel:
                     # Append on a 'tower' dimension which we will average over below.
                     grads.append(expanded_g)
 
-                    # Average over the 'tower' dimension.
-                    grad = tf.concat(axis=0, values=grads)
-                    grad = tf.reduce_mean(grad, 0)
+               # Average over the 'tower' dimension.
+               grad = tf.concat(axis=0, values=grads)
+               grad = tf.reduce_mean(grad, 0)
 
-                    # Keep in mind that the Variables are redundant because they are shared
-                    # across towers. So .. we will just return the first tower's pointer to
-                    # the Variable.
-                    v = grad_and_vars[0][1]
-                    grad_and_var = (grad, v)
-                    average_grads.append(grad_and_var)
+               # Keep in mind that the Variables are redundant because they are shared
+               # across towers. So .. we will just return the first tower's pointer to
+               # the Variable.
+               v = grad_and_vars[0][1]
+               grad_and_var = (grad, v)
+               average_grads.append(grad_and_var)
                     
           return average_grads
 
@@ -321,8 +323,7 @@ class RegressionModel:
                     validation_summaries.append(tf.summary.scalar('xerror', validation_summary_x))
                     validation_summaries.append(tf.summary.scalar('yerror', validation_summary_y))
                     validation_summaries.append(tf.summary.scalar('theta_error', validation_summary_theta))
-                         
-               validation_summary_op = tf.summary.merge(validation_summaries)
+                    validation_summary_op = tf.summary.merge(validation_summaries)
 
                
                init = tf.global_variables_initializer()
@@ -340,7 +341,9 @@ class RegressionModel:
 
                summary_writer = tf.summary.FileWriter(FLAGS.train_dir, sess.graph)
                meta_graph_def = tf.train.export_meta_graph(filename=FLAGS.train_dir+'/my-model.meta')
-               self.load_dataset(num_items=15000, test_items = 1000)
+
+               TEST_COUNT = int (1000 / (FLAGS.num_gpus * FLAGS.batch_size)) * FLAGS.num_gpus * FLAGS.batch_size; 
+               self.load_dataset(num_items=18000, test_items = TEST_COUNT)
                print("GRAPH IS  SAVED")
                self.indices = np.arange(self.num_items)
                np.random.shuffle(self.indices)
@@ -349,6 +352,8 @@ class RegressionModel:
                #print 'testing'
                #sys.exit()
                
+               # Loading test batch only once
+               testbatch = self.load_testbatch()               
                for step in range(FLAGS.max_steps):
                     start_time = time.time()
                     batch_indices = self.minibatch_indices(step)
@@ -376,7 +381,6 @@ class RegressionModel:
 
                     if step % FLAGS.save_valid_every == 0:
                          
-                         testbatch = self.load_testbatch()
                          items_per_gpu = self.test_items / FLAGS.num_gpus
                          total_test_batch = items_per_gpu /  FLAGS.batch_size;
 
@@ -404,9 +408,9 @@ class RegressionModel:
                               vy_loss.append(vy_sum)
                               vtheta_loss.append(vtheta_sum)
                                                                            
-                         sx = sum(vx_loss) / self.test_items
-                         sy = sum(vy_loss) / self.test_items
-                         stheta = sum(vtheta_loss) / self.test_items
+                         sx = sum(vx_loss) / TEST_COUNT
+                         sy = sum(vy_loss) / TEST_COUNT
+                         stheta = sum(vtheta_loss) / TEST_COUNT
                          
                          feed_dict = {validation_summary_x:(sx), validation_summary_y:(sy), validation_summary_theta:(stheta)}
                          print 'Validation Summary X_loss {:.3f}, \t YLoss {:.3f}, \t ThetaLoss {:.3f}'.format(sx, sy, stheta)
