@@ -1,9 +1,11 @@
 import tensorflow as tf
 import os
+import glob
 
 FLAGS = None
-TRAIN_FILE = "train.tfrecords"
-VALIDATION_FILE = "validation.tfrecords"
+
+#TRAIN_FILE = "train.tfrecords"
+#VALIDATION_FILE = "validation.tfrecords"
 DIRECTORY = "/media/data_raid/dnn_localization/localization_dataset/tf_records/"
 
 PRIOR_SIZE = 500
@@ -33,13 +35,7 @@ def read_and_decode(filename_queue):
 
     image.set_shape([PRIOR_SIZE*PRIOR_SIZE*2])
     output.set_shape([3])
-    
-    print image.dtype
-    print image.shape
-
-    print output.dtype
-    print output.shape
-    
+            
     return image, output
 
 def inputs(is_train, batch_size, num_epochs):
@@ -59,10 +55,13 @@ def inputs(is_train, batch_size, num_epochs):
     """
     
     if not num_epochs: num_epochs = None
-    filename = os.path.join(DIRECTORY, TRAIN_FILE if is_train else VALIDATION_FILE)
- 
+    dirPath = os.path.join(DIRECTORY, "train_dir/*.tfrecords" if is_train else "validation_dir/*.tfrecords")
+
+    filename_list = glob.glob(dirPath)
+    print ("Number of files: %d") % len(filename_list)
+
     with tf.name_scope('input'):
-        filename_queue = tf.train.string_input_producer( [filename], num_epochs=num_epochs, shuffle=True)
+        filename_queue = tf.train.string_input_producer( filename_list, num_epochs=num_epochs, shuffle=True)
         
         image, output = read_and_decode(filename_queue)
         
@@ -72,16 +71,16 @@ def inputs(is_train, batch_size, num_epochs):
 
         images, outputs = tf.train.shuffle_batch(
             [image, output], batch_size=batch_size, num_threads=2,
-            capacity=500+4*batch_size,
+            capacity=500+2*batch_size,
             # Ensures a minimum amount of shuffling of examples
-            min_after_dequeue=500,
+            min_after_dequeue=200,
             )
 
-        print "After Shuffle Size: " + str(images.shape)
+        #print "After Shuffle Size: " + str(images.shape)
         images = tf.reshape(images, (batch_size, PRIOR_SIZE, PRIOR_SIZE, 2))
 
-        print images.shape
-        print outputs.shape
+        #print images.shape
+        #print outputs.shape
         
         return images, outputs
             

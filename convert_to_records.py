@@ -54,21 +54,71 @@ def convert_to(filename, prior, local, output):
                                         
     
 def main(argv=None):
+
     # get the data
     filedir = '/media/data_raid/dnn_localization/localization_dataset/'
-    filename = 'annarbor_dataset_dnn.hdf5'
-
+    filename = 'annarbor_dataset_dnn_1.hdf5'
     fin = h5py.File(filedir+filename, 'r')
 
+    # examples per file 
+    EXAMPLES_PER_FILE = 1000
+    
     totalExamples = fin['prior_map'].shape[0]
     testExamples = totalExamples - FLAGS.validation_size
-
+    
     prior_map = fin['prior_map']
     local_map = fin['local_map']
     output = fin['output']
+
+    """ 
+    # Decrease number of files
+    # Before doing this test whether increasing the num_threads improve the performance
+
+    examplesPrcessed = 0
+    fileCounter = 0
+    while examplesProcessed < testExamples:
+        
+        examplesToSave = EXAMPLES_PER_FILE
+        if examplesProcessed + examplesToSave > testExamples:
+            examplesToSave = testExamples - examplesProcessed
+        fileSuffix = "train_dir/%d" % fileCounter
+        
+        convert_to(fileSu
+        examplesProcessed = examplesProcessed + examplesToSave
+        fileCounter = fileCounter + 1
+    """
     
-    convert_to('train', prior_map[:testExamples], local_map[:testExamples/20], output[:testExamples])
-    convert_to('validation', prior_map[testExamples:totalExamples], local_map[testExamples/20:totalExamples/20], output[testExamples:totalExamples])
+    for counter in range(testExamples/EXAMPLES_PER_FILE):
+
+        fileSuffix = "train_dir/%d" % counter
+
+        baseIndex = counter * EXAMPLES_PER_FILE
+        endIndex = baseIndex + EXAMPLES_PER_FILE
+
+        print "BaseIndex: " + str(baseIndex)
+        
+        localBaseIndex = baseIndex / 50
+        localEndIndex = endIndex / 50 + 1
+        
+        convert_to(fileSuffix, prior_map[baseIndex:endIndex], local_map[localBaseIndex:localEndIndex], output[baseIndex:endIndex])
+
+    for counter in range(FLAGS.validation_size/EXAMPLES_PER_FILE):
+
+        fileSuffix = "validation_dir/%d" % counter
+        
+        baseIndex = counter * EXAMPLES_PER_FILE + testExamples
+        endIndex = baseIndex + EXAMPLES_PER_FILE
+
+        print "BaseIndex: " + str(baseIndex)
+
+        localBaseIndex = baseIndex / 50
+        localEndIndex = endIndex / 50 + 1
+
+        convert_to(fileSuffix, prior_map[baseIndex:endIndex], local_map[localBaseIndex:localEndIndex], output[baseIndex:endIndex])
+            
+                   
+    #convert_to(str(test_counter), prior_map[:testExamples], local_map[:testExamples/20], output[:testExamples])
+    #convert_to('validation', prior_map[testExamples:totalExamples], local_map[testExamples/20:totalExamples/20], output[testExamples:totalExamples])
     
 if __name__ == '__main__':
   parser = argparse.ArgumentParser()
