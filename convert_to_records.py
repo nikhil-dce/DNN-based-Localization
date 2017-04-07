@@ -8,7 +8,7 @@ import tensorflow as tf
 
 PRIOR_SIZE = 500
 LOCAL_SIZE = 200
-
+LOCAL_PRIOR_MAPPING = 50
 
 def _int64_feature(value):
     return tf.train.Feature(int64_list=tf.train.Int64List(value=[value]))
@@ -35,7 +35,7 @@ def convert_to(filename, prior, local, output):
         image_input = np.zeros((PRIOR_SIZE, PRIOR_SIZE, 2))
 
         image_input[:,:,0] = np.reshape(prior[index], (PRIOR_SIZE, PRIOR_SIZE))
-        image_input[:,:,1] = np.pad(np.reshape(local[index/20], (LOCAL_SIZE, LOCAL_SIZE)), [[padding, padding], [padding,padding]], 'constant', constant_values=(0,0))
+        image_input[:,:,1] = np.pad(np.reshape(local[index/LOCAL_PRIOR_MAPPING], (LOCAL_SIZE, LOCAL_SIZE)), [[padding, padding], [padding,padding]], 'constant', constant_values=(0,0))
         out = output[index]
 
         image_raw = image_input.tostring()
@@ -70,24 +70,47 @@ def main(argv=None):
     local_map = fin['local_map']
     output = fin['output']
 
-    """ 
+    
     # Decrease number of files
     # Before doing this test whether increasing the num_threads improve the performance
-
-    examplesPrcessed = 0
+    """
+    examplesProcessed = 0
     fileCounter = 0
     while examplesProcessed < testExamples:
         
         examplesToSave = EXAMPLES_PER_FILE
         if examplesProcessed + examplesToSave > testExamples:
             examplesToSave = testExamples - examplesProcessed
-        fileSuffix = "train_dir/%d" % fileCounter
+        fileSuffix = "train_dir_2/%d" % fileCounter
         
-        convert_to(fileSu
+        print "Saving %d to %d" % (examplesProcessed, examplesProcessed + examplesToSave)
+
+        localBaseIndex = examplesProcessed / LOCAL_PRIOR_MAPPING
+        localEndIndex = (examplesProcessed + examplesToSave) / LOCAL_PRIOR_MAPPING + 1
+
+        convert_to(fileSuffix, prior_map[examplesProcessed:examplesProcessed+examplesToSave], local_map[localBaseIndex:localEndIndex], output[examplesProcessed:examplesProcessed + examplesToSave])
         examplesProcessed = examplesProcessed + examplesToSave
         fileCounter = fileCounter + 1
     """
+    examplesProcessed = testExamples
+    fileCounter = 0
+    while examplesProcessed < totalExamples:
+        
+        examplesToSave = EXAMPLES_PER_FILE
+        if examplesProcessed + examplesToSave > totalExamples:
+            examplesToSave = totalExamples - examplesProcessed
+        fileSuffix = "validation_dir_2/%d" % fileCounter
+        
+        print "Saving %d to %d" % (examplesProcessed, examplesProcessed + examplesToSave)
+
+        localBaseIndex = examplesProcessed / LOCAL_PRIOR_MAPPING
+        localEndIndex = (examplesProcessed + examplesToSave) / LOCAL_PRIOR_MAPPING + 1
+
+        convert_to(fileSuffix, prior_map[examplesProcessed:examplesProcessed+examplesToSave], local_map[localBaseIndex:localEndIndex], output[examplesProcessed:examplesProcessed + examplesToSave])
+        examplesProcessed = examplesProcessed + examplesToSave
+        fileCounter = fileCounter + 1
     
+    """
     for counter in range(testExamples/EXAMPLES_PER_FILE):
 
         fileSuffix = "train_dir/%d" % counter
@@ -101,7 +124,8 @@ def main(argv=None):
         localEndIndex = endIndex / 50 + 1
         
         convert_to(fileSuffix, prior_map[baseIndex:endIndex], local_map[localBaseIndex:localEndIndex], output[baseIndex:endIndex])
-
+    """
+    """
     for counter in range(FLAGS.validation_size/EXAMPLES_PER_FILE):
 
         fileSuffix = "validation_dir/%d" % counter
@@ -116,7 +140,7 @@ def main(argv=None):
 
         convert_to(fileSuffix, prior_map[baseIndex:endIndex], local_map[localBaseIndex:localEndIndex], output[baseIndex:endIndex])
             
-                   
+    """               
     #convert_to(str(test_counter), prior_map[:testExamples], local_map[:testExamples/20], output[:testExamples])
     #convert_to('validation', prior_map[testExamples:totalExamples], local_map[testExamples/20:totalExamples/20], output[testExamples:totalExamples])
     

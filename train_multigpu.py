@@ -23,9 +23,9 @@ tf.app.flags.DEFINE_integer('num_gpus', NUMBER_GPU,
                             """How many GPUs to use.""")
 tf.app.flags.DEFINE_integer('batch_size', 50,
                            """Number of images to process in a batch.""")
-tf.app.flags.DEFINE_integer('save_pred_every', 100,
+tf.app.flags.DEFINE_integer('save_pred_every', 20,
                            """Save summary frequency""")
-tf.app.flags.DEFINE_integer('print_pred_every', 50,
+tf.app.flags.DEFINE_integer('print_pred_every', 20,
                            """Print loss every steps""")
 tf.app.flags.DEFINE_integer('save_valid_every', 500,
                             """Save Validation summary""")
@@ -218,7 +218,7 @@ def train():
         # Build the summary operation from the last tower summaries.
         summary_op = tf.summary.merge(summaries)
 
-        """
+    
         # Validation Code
         vx_error_sqr = []
         vx_error_abs = []
@@ -296,7 +296,7 @@ def train():
             validation_summaries.append(tf.summary.scalar('loss_mae', weighted_mae))
 
             validation_summary_op = tf.summary.merge(validation_summaries)
-        """
+        
         # Setting up session and initialization stuf
        
         saver = tf.train.Saver(tf.global_variables())
@@ -337,7 +337,7 @@ def train():
             else:
                 loss_value, _ = sess.run([loss, train_op], feed_dict=feed_dict)
 
-            """
+            
             if step % FLAGS.save_valid_every == 0:
                             
                 items = FLAGS.test_items
@@ -379,8 +379,7 @@ def train():
                 
                 validation_summary = sess.run(validation_summary_op, feed_dict=feed_dict)
                 summary_writer.add_summary(validation_summary, step)
-            """
-            
+                        
             duration = time.time() - start_time
             # Now duration also includes the validation time...
 

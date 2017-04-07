@@ -55,7 +55,7 @@ def inputs(is_train, batch_size, num_epochs):
     """
     
     if not num_epochs: num_epochs = None
-    dirPath = os.path.join(DIRECTORY, "train_dir/*.tfrecords" if is_train else "validation_dir/*.tfrecords")
+    dirPath = os.path.join(DIRECTORY, "train_dir_2/*.tfrecords" if is_train else "validation_dir_2/*.tfrecords")
 
     filename_list = glob.glob(dirPath)
     print ("Number of files: %d") % len(filename_list)
@@ -71,9 +71,9 @@ def inputs(is_train, batch_size, num_epochs):
 
         images, outputs = tf.train.shuffle_batch(
             [image, output], batch_size=batch_size, num_threads=2,
-            capacity=500+2*batch_size,
+            capacity=500+3*batch_size,
             # Ensures a minimum amount of shuffling of examples
-            min_after_dequeue=200,
+            min_after_dequeue=500,
             )
 
         #print "After Shuffle Size: " + str(images.shape)
