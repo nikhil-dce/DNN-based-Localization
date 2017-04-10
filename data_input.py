@@ -64,20 +64,29 @@ def inputs(is_train, batch_size, num_epochs):
         filename_queue = tf.train.string_input_producer( filename_list, num_epochs=num_epochs, shuffle=True)
         
         image, output = read_and_decode(filename_queue)
+
+        image = tf.reshape(image, (PRIOR_SIZE, PRIOR_SIZE, 2))
         
         # Shuffle the examples and collect them into batch_size batches.
         # (Internally uses a Random Shuffle Queue.)
         # We run this in two threads to avoid being a bottleneck
 
-        images, outputs = tf.train.shuffle_batch(
-            [image, output], batch_size=batch_size, num_threads=2,
-            capacity=500+3*batch_size,
-            # Ensures a minimum amount of shuffling of examples
-            min_after_dequeue=500,
+        if is_train:
+            images, outputs = tf.train.shuffle_batch(
+                [image, output], batch_size=batch_size, num_threads=16,
+                capacity=5000+17*batch_size,
+                # Ensures a minimum amount of shuffling of examples
+                min_after_dequeue=2000, 
+            )
+        else:
+            images, outputs = tf.train.shuffle_batch(
+                [image, output], batch_size=batch_size, num_threads=2,
+                capacity=500+2*batch_size,
+                min_after_dequeue=50,
             )
 
         #print "After Shuffle Size: " + str(images.shape)
-        images = tf.reshape(images, (batch_size, PRIOR_SIZE, PRIOR_SIZE, 2))
+        #images = tf.reshape(images, (batch_size, PRIOR_SIZE, PRIOR_SIZE, 2))
 
         #print images.shape
         #print outputs.shape

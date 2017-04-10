@@ -5,6 +5,8 @@ import sys
 import re
 import os
 
+MOVING_AVERAGE_DECAY = 0.9999  # The decay to use for the moving average.
+
 def lrelu(x, leak=0.2, name="lrelu"):
      with tf.variable_scope(name):
          f1 = 0.5 * (1 + leak)
@@ -32,9 +34,6 @@ class RegressionModel:
 
      def __init__(self,  trainable=True):
           self.trainable = trainable
-          # these will change at the time of load_dataset
-          self.train_items = 500
-          self.test_items = 200
           self.weights = [1,1,1]
 
 
@@ -46,35 +45,70 @@ class RegressionModel:
           self.images = images
           tf.summary.image("prior",tf.expand_dims(images[:,:,:,0],-1))
           tf.summary.image("local",tf.expand_dims(images[:,:,:,1],-1))
-          
-          self.conv1 =  self.conv_layer(images, 2, 16, "conv1",filter_size=5,padding="SAME")
+
+          # Will make network deeper and shallower following the VGG guidelines
+          # While applying max pool increase the following layers filter depth
+          # Only use 3X3 filters
+          # Atleast 2 FC with dropout
+          # Max pool not after every conv
+                    
+          self.conv1 =  self.conv_layer(images, 2, 32, "conv1",filter_size=3,padding="SAME")
           self.conv1 =  batch_norm(name='bn_conv1')(self.conv1, phase)
-          self.conv1 = self.max_pool(self.conv1,"max_pool_1")
 
-          self.conv2 =  self.conv_layer(self.conv1, 16, 32, "conv2",filter_size=5,padding="SAME")
-          self.conv2 =  batch_norm(name='bn_conv2')(self.conv2, phase)
-          self.conv2 = self.max_pool(self.conv2,"max_pool_2")
+          self.conv2 = self.conv_layer(self.conv1, 32, 32, "conv2", filter_size=3, padding="SAME")
+          self.conv2 = self.max_pool(self.conv2,"max_pool_1")
+          self.conv2 = batch_norm(name='bn_conv2')(self.conv2, phase)
+
+          self.conv3 = self.conv_layer(self.conv2, 32, 64, "conv3", filter_size=3, padding="SAME")
+          self.conv3 = batch_norm(name='bn_conv3')(self.conv3, phase)
+
+          self.conv4 = self.conv_layer(self.conv3, 64, 64, "conv4", filter_size=3, padding="SAME")
+          self.conv4 = self.max_pool(self.conv4, "max_pool_2")
+          self.conv4 = batch_norm(name='bn_conv4')(self.conv4, phase)
+
+          self.conv5 = self.conv_layer(self.conv4, 64, 128, "conv5", filter_size=3, padding="SAME")
+          self.conv5 = batch_norm(name='bn_conv5')(self.conv5, phase)
+
+          self.conv6 = self.conv_layer(self.conv5, 128, 128, "conv6", filter_size=3, padding="SAME")
+          self.conv6 = self.max_pool(self.conv6, "max_pool_3")
+          self.conv6 = batch_norm(name='bn_conv6')(self.conv6, phase)
+
+          self.conv7 = self.conv_layer(self.conv6, 128, 256, "conv7", filter_size=3, padding="SAME")
+          self.conv7 = batch_norm(name='bn_conv7')(self.conv7, phase)
+
+          self.conv8 = self.conv_layer(self.conv7, 256, 256, "conv8", filter_size=3, padding="SAME")
+          self.conv8 = self.max_pool(self.conv8, "max_pool_4")
+          self.conv8 = batch_norm(name='bn_conv8')(self.conv8, phase)
+
+          self.conv9 = self.conv_layer(self.conv8, 256, 256, "conv9", filter_size=3, padding="SAME")
+          self.conv9 = self.max_pool(self.conv9, "max_pool_5")
+          self.conv9 = batch_norm(name='bn_conv9')(self.conv9, phase)
+
+          self.conv10 = self.conv_layer(self.conv9, 256, 512, "conv10", filter_size=3, padding="SAME")
+          self.conv10 = self.max_pool(self.conv10, "max_pool_6")
+          self.conv10 = batch_norm(name='bn_conv10')(self.conv10, phase)
+                    
+          print "FC input: " + str(self.conv10.get_shape())
+
           
-          self.conv3 = self.conv_layer(self.conv2, 32, 32, "conv3", filter_size=3, padding="SAME")
-          self.conv3 = batch_norm(name="bn_conv3")(self.conv3, phase)
-          self.conv3 = self.max_pool(self.conv3, "max_pool_3")
-
-          self.conv4 = self.conv_layer(self.conv3, 32, 64, "conv4", filter_size=3, padding="SAME")
-          self.conv4 = batch_norm(name="bn_conv4")(self.conv4, phase)
-          self.conv4 = self.max_pool(self.conv4, "max_pool_4")
-
-          print "After Maxpool4: " + str(self.conv4.get_shape())
+          self.fc_1 = self.fc_layer(self.conv10,8*8*512, 4096,"fc_1")
 
           if phase:
-               self.conv4_dropout = self.dropout(self.conv4, 0.5, "dropout")
+               self.fc_1_dropout = self.dropout(self.fc_1, 0.5, "dropout_1")
           else:
-               self.conv4_dropout = self.dropout(self.conv4, 1, "dropout")
+               self.fc_1_dropout = self.dropout(self.fc_1, 1, "dropout_1")
 
-          print "After dropout: " + str(self.conv4_dropout.get_shape())
+          self.fc_2 = self.fc_layer(self.fc_1_dropout, 4096, 1024, "fc_2")
 
-          self.fc_1 = self.fc_layer(self.conv4_dropout,32*32*64,3,"fc")
+          if phase:
+               self.fc_2_dropout = self.dropout(self.fc_2, 0.5, "dropout_2")
+          else:
+               self.fc_2_dropout = self.dropout(self.fc_2, 1, "dropout_2")
 
-          self.output = self.fc_1
+          self.fc_3 = self.fc_layer(self.fc_2_dropout, 1024, 3, "fc_3")
+               
+
+          self.output = self.fc_3
 
      def inference(self,images,phase):
           self.build(images,phase)
