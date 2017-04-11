@@ -4,6 +4,7 @@ import tensorflow as tf
 import time
 import os
 import math
+import sys
 from datetime import datetime
 
 import data_input as data
@@ -28,7 +29,7 @@ tf.app.flags.DEFINE_integer('num_examples', 1000,
                             """Number of examples to run.""")
 tf.app.flags.DEFINE_boolean('run_once', True,
                             """Whether to run eval only once.""")
-tf.app.flags.DEFINE_integer('batch_size', 10,
+tf.app.flags.DEFINE_integer('batch_size', 20,
                             """Batch Size""")
 
 def eval_once(saver, summary_writer, batch_loss_array, variables_to_restore):
@@ -36,6 +37,7 @@ def eval_once(saver, summary_writer, batch_loss_array, variables_to_restore):
     print "Eval Once"
     with tf.Session() as sess:
 
+        
         
         ckpt = tf.train.get_checkpoint_state(FLAGS.checkpoint_dir)
 
@@ -50,10 +52,14 @@ def eval_once(saver, summary_writer, batch_loss_array, variables_to_restore):
         else:
             print ("No checkpoint exists")
             return
-                
+
+        #print (sess.run(variables_to_restore))
+        #sys.exit(0)
+
         # Start the queue runners
         coord = tf.train.Coordinator()
-        #print (sess.run(variables_to_restore))
+
+                
         try:
             threads = []
             for qr in tf.get_collection(tf.GraphKeys.QUEUE_RUNNERS):
@@ -97,8 +103,8 @@ def evaluate():
         
         # Get validation input
         is_train = False
-        batch_size = 10
-        images, label = data.inputs(is_train, batch_size, None)
+        
+        images, label = data.inputs(is_train, FLAGS.batch_size, None)
 
         # Build a graph to output pose
         output = r_model.inference(images, is_train)

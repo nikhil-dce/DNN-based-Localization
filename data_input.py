@@ -58,7 +58,7 @@ def inputs(is_train, batch_size, num_epochs):
     dirPath = os.path.join(DIRECTORY, "train_dir_2/*.tfrecords" if is_train else "validation_dir_2/*.tfrecords")
 
     filename_list = glob.glob(dirPath)
-    print ("Number of files: %d") % len(filename_list)
+    print ("Number of files: %d Extracting batch: %d") % (len(filename_list), batch_size)
 
     with tf.name_scope('input'):
         filename_queue = tf.train.string_input_producer( filename_list, num_epochs=num_epochs, shuffle=True)

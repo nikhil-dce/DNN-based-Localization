@@ -433,7 +433,7 @@ def train():
 
 def main(argv=None):
 
-    RUN_DIR = "run_14"
+    RUN_DIR = "run_15"
     TEST_ITEMS = 1000
     FLAGS.test_items = (TEST_ITEMS / (FLAGS.num_gpus * FLAGS.batch_size)) * FLAGS.num_gpus * FLAGS.batch_size
     FLAGS.train_dir = os.path.join(FLAGS.root_dir, RUN_DIR) 
