@@ -11,18 +11,18 @@ import sys
 import time
 
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   # see issue #152
-os.environ["CUDA_VISIBLE_DEVICES"]="0,1"
+os.environ["CUDA_VISIBLE_DEVICES"]="2,3"
 NUMBER_GPU = 2
 FLAGS = tf.app.flags.FLAGS
 
 tf.app.flags.DEFINE_string('root_dir', '/media/data_raid/nikhil/events_summary',
                            """Directory where to write event logs """
                            """and checkpoint.""")
-tf.app.flags.DEFINE_integer('max_steps', 200000,
+tf.app.flags.DEFINE_integer('max_steps', 300000,
                             """Number of batches to run.""")
 tf.app.flags.DEFINE_integer('num_gpus', NUMBER_GPU,
                             """How many GPUs to use.""")
-tf.app.flags.DEFINE_integer('batch_size', 20,
+tf.app.flags.DEFINE_integer('batch_size', 40,
                            """Number of images to process in a batch.""")
 tf.app.flags.DEFINE_integer('save_pred_every', 20,
                            """Save summary frequency""")
@@ -30,7 +30,7 @@ tf.app.flags.DEFINE_integer('print_pred_every', 20,
                            """Print loss every steps""")
 tf.app.flags.DEFINE_integer('save_valid_every', 500,
                             """Save Validation summary""")
-tf.app.flags.DEFINE_integer('save_checkpoint_every', 1000,
+tf.app.flags.DEFINE_integer('save_checkpoint_every', 5000,
                             """Save checkpoint/snapshot""")
 
 NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = 30
@@ -49,6 +49,21 @@ def test_input():
     with tf.Graph().as_default():
         # Input images and labels
 
+        prior_maps, local_maps, outputs = data.inputs(is_train=True, batch_size=10, num_epochs=10)
+
+        with tf.name_scope("summary_logs") as scope:
+            tf.summary.image("local", local_maps)
+            tf.summary.image("prior", prior_maps)
+
+            tf.summary.histogram("x_outputs", outputs[:,0])
+            tf.summary.histogram("y_outputs", outputs[:,1])
+            tf.summary.histogram("theta_outputs", outputs[:,2])
+
+            summaries = tf.get_collection(tf.GraphKeys.SUMMARIES, scope)
+            summary_op = tf.summary.merge(summaries)
+
+        """
+
         images, outputs = data.inputs(is_train=True, batch_size=5, num_epochs=500)
 
         with tf.name_scope("summary_logs") as scope:
@@ -62,7 +77,7 @@ def test_input():
             summaries = tf.get_collection(tf.GraphKeys.SUMMARIES, scope)
             summary_op = tf.summary.merge(summaries)
 
-
+        """
 
         # The op for initializing the variables.
         init_op = tf.group(tf.global_variables_initializer(), tf.local_variables_initializer())
@@ -152,12 +167,19 @@ def train():
 
         phaseTrain = True
 
+        prior_maps, local_maps, outputs = data.inputs(is_train=phaseTrain, batch_size=(FLAGS.batch_size*FLAGS.num_gpus), num_epochs=None)
+        
+        split_priors = tf.split(prior_maps, FLAGS.num_gpus, 0, name='split_priors')
+        split_locals = tf.split(local_maps, FLAGS.num_gpus, 0, name='split_locals')
+        split_labels = tf.split(outputs, FLAGS.num_gpus, 0, name='split_outputs')
+        
+        """
         # Get input based on phase for each tower
         images, labels = data.inputs(is_train=phaseTrain, batch_size=(FLAGS.batch_size*FLAGS.num_gpus), num_epochs=None)
 
         split_images = tf.split(images, FLAGS.num_gpus, 0)
         split_labels = tf.split(labels, FLAGS.num_gpus, 0)
-        
+        """
         with tf.variable_scope(tf.get_variable_scope()) as main_scope:
             for i in xrange(FLAGS.num_gpus):
                 with tf.device('/gpu:%d' % i):
@@ -173,10 +195,12 @@ def train():
                         # all towers.
 
                         # Calculating tower loss
-                        output = regressionModel.inference(split_images[i], phaseTrain)
+                        #output = regressionModel.inference(split_images[i], phaseTrain)
+                        
+                        output = regressionModel.twin_inference(split_priors[i], split_locals[i], phaseTrain)
                         loss = regressionModel.loss(output, split_labels[i]) 
                                                                                    
-                        # Reuse variables for the next tower.
+                        # Reuse variables for the next tower. This ensures all nested scopes also have reuse True
                         tf.get_variable_scope().reuse_variables()
 
                         # Retain the summaries from the final tower.
@@ -194,8 +218,6 @@ def train():
                         # Keep track of the gradients across all towers.
                         tower_grads.append(grads)
 
-        #print(tf.get_default_graph().as_graph_def())
-        #sys.exit(0)
 
         # We must calculate the mean of each gradient. Note that this is the
         # synchronization point across all towers.
@@ -322,7 +344,21 @@ def train():
         config.allow_soft_placement = True
         sess = tf.Session(config=config)
 
-        
+        total_parameters = 0
+        for variable in tf.trainable_variables():
+            # shape is an array of tf.Dimension
+            shape = variable.get_shape()
+            variable_parametes = 1
+            for dim in shape:
+                variable_parametes *= dim.value
+                
+            #print(variable_parametes)
+            #print ("Name: %s Parameters: %d " % (variable.name, variable_parametes) )
+            total_parameters += variable_parametes
+        print 'Total Parameters: %d' % (total_parameters)
+#        print(tf.get_default_graph().as_graph_def())
+#        sys.exit(0)
+
         sess.run(init)
         
         print("EVERYTHING IS INITIALIZED")
@@ -331,14 +367,17 @@ def train():
         meta_graph_def = tf.train.export_meta_graph(filename=FLAGS.train_dir+'/my-model.meta')
         
         print("GRAPH IS  SAVED")
-                
+        sys.stdout.flush()
+
+#        sys.exit(0)
+
         # Training loop 
         # Start input enqueue threads.
         coord = tf.train.Coordinator()
         threads = tf.train.start_queue_runners(sess=sess, coord=coord)
 
         
-        time.sleep(50)
+        time.sleep(60)
         for step in range(FLAGS.max_steps):
             start_time = time.time()
 
@@ -422,6 +461,8 @@ def train():
                 print 'Saving model Checkpoint...'
                 checkpoint_path = os.path.join(FLAGS.train_dir, 'model.ckpt')
                 saver.save(sess, checkpoint_path, global_step=step)
+
+        sys.stdout.flush()   
         
         coord.request_stop()
         
@@ -433,9 +474,7 @@ def train():
 
 def main(argv=None):
 
-    RUN_DIR = "run_15"
-    TEST_ITEMS = 1000
-    FLAGS.test_items = (TEST_ITEMS / (FLAGS.num_gpus * FLAGS.batch_size)) * FLAGS.num_gpus * FLAGS.batch_size
+    RUN_DIR = "run_21"
     FLAGS.train_dir = os.path.join(FLAGS.root_dir, RUN_DIR) 
 
     if tf.gfile.Exists(FLAGS.train_dir):

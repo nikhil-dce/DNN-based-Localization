@@ -13,21 +13,21 @@ import model
 from model import RegressionModel
 
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   # see issue #152
-os.environ["CUDA_VISIBLE_DEVICES"]="2"
+os.environ["CUDA_VISIBLE_DEVICES"]=""
 
 FLAGS = tf.app.flags.FLAGS
 
-tf.app.flags.DEFINE_string('eval_dir', '/media/data_raid/nikhil/events_summary/eval_14',
+tf.app.flags.DEFINE_string('eval_dir', '/media/data_raid/nikhil/events_summary/eval_21',
                            """Directory where to write event logs.""")
 tf.app.flags.DEFINE_string('eval_data', 'test',
                            """Either 'test' or 'train_eval'.""")
-tf.app.flags.DEFINE_string('checkpoint_dir', '/media/data_raid/nikhil/events_summary/run_14',
+tf.app.flags.DEFINE_string('checkpoint_dir', '/media/data_raid/nikhil/events_summary/run_21',
                            """Directory where to read model checkpoints.""")
-tf.app.flags.DEFINE_integer('eval_interval_secs', 60 * 5,
+tf.app.flags.DEFINE_integer('eval_interval_secs', 60 * 30,
                             """How often to run the eval.""")
-tf.app.flags.DEFINE_integer('num_examples', 1000,
+tf.app.flags.DEFINE_integer('num_examples', 5000,
                             """Number of examples to run.""")
-tf.app.flags.DEFINE_boolean('run_once', True,
+tf.app.flags.DEFINE_boolean('run_once', False,
                             """Whether to run eval only once.""")
 tf.app.flags.DEFINE_integer('batch_size', 20,
                             """Batch Size""")
@@ -35,10 +35,8 @@ tf.app.flags.DEFINE_integer('batch_size', 20,
 def eval_once(saver, summary_writer, batch_loss_array, variables_to_restore):
 
     print "Eval Once"
+    sys.stdout.flush()   
     with tf.Session() as sess:
-
-        
-        
         ckpt = tf.train.get_checkpoint_state(FLAGS.checkpoint_dir)
 
         if ckpt and ckpt.model_checkpoint_path:
@@ -54,6 +52,8 @@ def eval_once(saver, summary_writer, batch_loss_array, variables_to_restore):
             return
 
         #print (sess.run(variables_to_restore))
+        #print(tf.get_default_graph().as_graph_def())
+        #print sess.run("conv1/conv1_filters:0")
         #sys.exit(0)
 
         # Start the queue runners
@@ -64,51 +64,70 @@ def eval_once(saver, summary_writer, batch_loss_array, variables_to_restore):
             threads = []
             for qr in tf.get_collection(tf.GraphKeys.QUEUE_RUNNERS):
                 threads.extend(qr.create_threads(sess, coord=coord, daemon=True,
-                                                 start=True))
+                                             start=True))
 
             num_iter = int(math.ceil(FLAGS.num_examples / FLAGS.batch_size))
-            total_sample_count = num_iter * FLAGS.batch_size
+            # total_sample_count = num_iter * FLAGS.batch_size
             step = 0
             total_loss = 0
-            accumulate_loss = np.empty((0,8))
+            accumulate_loss = np.empty((0,3))
             while step < num_iter and not coord.should_stop():
                 batch_loss_values = sess.run(batch_loss_array)
-                batch_loss_values = np.array(batch_loss_values).reshape(1,8)
+                batch_loss_values = np.array(batch_loss_values).reshape(1,3)
                 accumulate_loss = np.append(accumulate_loss, batch_loss_values, axis=0)
                 step += 1                        
             accumulate_loss = accumulate_loss.sum(axis=0)
             accumulate_loss /= (step*FLAGS.batch_size)
-
+            
             print accumulate_loss
             print ('%s: Total Steps = %d' % (datetime.now(),  step))
 
-            #summary = tf.Summary()
-            #summary.ParseFromString(sess.run(summary_op))
-            #summary_writer.add_summary(summary, global_step)
+            """
+            with tf.name_scope("validation_summary"):
+                validation_summaries = []
+                validation_summaries.append(tf.summary.scalar('loss_mse', accumulate_loss[0]))
+                validation_summaries.append(tf.summary.scalar('loss_mae', accumulate_loss[1]))
+                validation_summaries.append(tf.summary.scalar('x_mse', accumulate_loss[2]))
+                validation_summaries.append(tf.summary.scalar('x_mae', accumulate_loss[3]))
+                validation_summaries.append(tf.summary.scalar('y_mse', accumulate_loss[4]))
+                validation_summaries.append(tf.summary.scalar('y_mae', accumulate_loss[5]))
+                validation_summaries.append(tf.summary.scalar('theta_mse', accumulate_loss[6]))
+                validation_summaries.append(tf.summary.scalar('theta_mae',accumulate_loss[7]))
+
+                validation_summary_op = tf.summary.merge(validation_summaries)
+                
+            validation_summary = sess.run(validation_summary_op)
+            summary_writer.add_summary(validation_summary, global_step)
+            
+                #summary = tf.Summary()
+                #summary.ParseFromString(sess.run(summary_op))
+                #summary_writer.add_summary(summary, global_step)
+            """
 
         except Exception as e:
             coord.request_stop(e)
 
         coord.request_stop()
         coord.join(threads, stop_grace_period_secs=10)
-
-
+        sys.stdout.flush()
                    
 def evaluate():
 
     print "Evaluate"
     with tf.Graph().as_default() as g:
-
+        
         r_model = RegressionModel()
         
         # Get validation input
         is_train = False
-        
-        images, label = data.inputs(is_train, FLAGS.batch_size, None)
+
+        prior_maps, local_maps, labels = data.inputs(is_train, FLAGS.batch_size, None)
+#        images, label = data.inputs(is_train, FLAGS.batch_size, None)
 
         # Build a graph to output pose
-        output = r_model.inference(images, is_train)
-        batch_loss_array = r_model.batch_loss(output, label)
+        output = r_model.twin_inference(prior_maps, local_maps, is_train)
+#        output = r_model.inference(images, is_train)
+        batch_loss_array = r_model.batch_loss(output, labels)
         
         variable_averages = tf.train.ExponentialMovingAverage(model.MOVING_AVERAGE_DECAY)
         variables_to_restore = variable_averages.variables_to_restore()

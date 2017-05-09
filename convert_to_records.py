@@ -32,6 +32,24 @@ def convert_to(filename, prior, local, output):
     writer = tf.python_io.TFRecordWriter(fileToSave)
     for index in range(examplesToSave):
 
+        prior_input = 255 * np.reshape(prior[index], (PRIOR_SIZE, PRIOR_SIZE))
+        local_input = 255 * np.reshape(local[index/LOCAL_PRIOR_MAPPING], (LOCAL_SIZE, LOCAL_SIZE))
+        out = output[index]
+
+        prior_input = prior_input.astype(np.uint8)
+        local_input = local_input.astype(np.uint8)
+
+        prior_raw = prior_input.tostring()
+        local_raw = local_input.tostring()
+        out_raw = out.tostring()
+
+        example = tf.train.Example(features=tf.train.Features(feature={
+            'prior_raw': _bytes_feature(prior_raw),
+            'local_raw': _bytes_feature(local_raw),
+            'output_raw': _bytes_feature(out_raw)}) )
+        writer.write(example.SerializeToString())
+
+        """
         image_input = np.zeros((PRIOR_SIZE, PRIOR_SIZE, 2))
 
         image_input[:,:,0] = np.reshape(prior[index], (PRIOR_SIZE, PRIOR_SIZE))
@@ -40,14 +58,17 @@ def convert_to(filename, prior, local, output):
 
         image_raw = image_input.tostring()
         out_raw = out.tostring()
-
+        
         example = tf.train.Example(features=tf.train.Features(feature={
-            'height': _int64_feature(rows),
-            'width' : _int64_feature(cols),
-            'depth' : _int64_feature(depth),
+            #'height': _int64_feature(rows),
+            #'width' : _int64_feature(cols),
+            #'depth' : _int64_feature(depth),
             'output_raw': _bytes_feature(out_raw),
             'image_raw' : _bytes_feature(image_raw)}))
         writer.write(example.SerializeToString())
+        """
+
+
     writer.close()
 
         
@@ -61,7 +82,7 @@ def main(argv=None):
     fin = h5py.File(filedir+filename, 'r')
 
     # examples per file 
-    EXAMPLES_PER_FILE = 1000
+    EXAMPLES_PER_FILE = 5000
     
     totalExamples = fin['prior_map'].shape[0]
     testExamples = totalExamples - FLAGS.validation_size
@@ -73,7 +94,7 @@ def main(argv=None):
     
     # Decrease number of files
     # Before doing this test whether increasing the num_threads improve the performance
-    """
+    
     examplesProcessed = 0
     fileCounter = 0
     while examplesProcessed < testExamples:
@@ -81,7 +102,7 @@ def main(argv=None):
         examplesToSave = EXAMPLES_PER_FILE
         if examplesProcessed + examplesToSave > testExamples:
             examplesToSave = testExamples - examplesProcessed
-        fileSuffix = "train_dir_2/%d" % fileCounter
+        fileSuffix = "train_dir_3/%d" % fileCounter
         
         print "Saving %d to %d" % (examplesProcessed, examplesProcessed + examplesToSave)
 
@@ -91,7 +112,7 @@ def main(argv=None):
         convert_to(fileSuffix, prior_map[examplesProcessed:examplesProcessed+examplesToSave], local_map[localBaseIndex:localEndIndex], output[examplesProcessed:examplesProcessed + examplesToSave])
         examplesProcessed = examplesProcessed + examplesToSave
         fileCounter = fileCounter + 1
-    """
+    
     examplesProcessed = testExamples
     fileCounter = 0
     while examplesProcessed < totalExamples:
@@ -99,7 +120,7 @@ def main(argv=None):
         examplesToSave = EXAMPLES_PER_FILE
         if examplesProcessed + examplesToSave > totalExamples:
             examplesToSave = totalExamples - examplesProcessed
-        fileSuffix = "validation_dir_2/%d" % fileCounter
+        fileSuffix = "validation_dir_3/%d" % fileCounter
         
         print "Saving %d to %d" % (examplesProcessed, examplesProcessed + examplesToSave)
 
